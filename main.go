@@ -1,72 +1,82 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
+	"html/template"
 	"net/http"
-	"os"
 	"sync"
-	"time"
 )
 
-// Order структура заказа
-type Order struct {
-	ID        int       `json:"id"`
-	Item      string    `json:"item"`
-	CreatedAt time.Time `json:"created_at"`
+// Данные о состоянии Кирилла
+type PageData struct {
+	Name   string
+	Weight int
+	Size   int
 }
 
 var (
-	orders []Order
-	nextID = 1
+	weight = 100 // Начальный вес
+	size   = 150 // Начальный размер картинки в пикселях
 	mu     sync.Mutex
 )
 
 func main() {
-	// 1. Раздаем статические файлы из папки static
-	http.Handle("/", http.FileServer(http.Dir("./static")))
+	http.HandleFunc("/", homeHandler)
+	http.HandleFunc("/feed", feedHandler)
 
-	// 2. API для работы с заказами
-	http.HandleFunc("/orders", orderHandler)
-
-	// 3. Настройка порта для Render.com
-	// Render сам передает номер порта через переменную окружения PORT
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080" // Если запускаем локально и порта в настройках нет
-	}
-
-	fmt.Printf("🚀 Сервер запущен! Переходи по адресу: http://localhost:%s\n", port)
-
-	// Запуск сервера
-	err := http.ListenAndServe(":"+port, nil)
-	if err != nil {
-		fmt.Println("Ошибка при запуске сервера:", err)
-	}
+	fmt.Println("Сервер запущен на http://localhost:8080")
+	http.ListenAndServe(":8080", nil)
 }
 
-func orderHandler(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(orders)
-	case http.MethodPost:
-		var newOrder Order
-		err := json.NewDecoder(r.Body).Decode(&newOrder)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
+func homeHandler(w http.ResponseWriter, r *http.Request) {
+	tmpl := template.Must(template.New("index").Parse(htmlTemplate))
+	mu.Lock()
+	data := PageData{Name: "Кирилл Свинота", Weight: weight, Size: size}
+	mu.Unlock()
+	tmpl.Execute(w, data)
+}
 
+func feedHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
 		mu.Lock()
-		newOrder.ID = nextID
-		newOrder.CreatedAt = time.Now()
-		nextID++
-		orders = append(orders, newOrder)
+		weight += 10
+		size += 15 // Увеличиваем размер, чтобы он становился толще
 		mu.Unlock()
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(newOrder)
 	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
+
+// HTML-шаблон прямо в коде для удобства
+const htmlTemplate = `
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Кормушка</title>
+    <style>
+        body { text-align: center; font-family: sans-serif; background-color: #f0f0f0; }
+        .kirill { 
+            transition: all 0.3s ease; 
+            display: inline-block;
+            background-color: pink;
+            border-radius: 50%;
+            border: 5px solid #ff80ab;
+            margin: 20px;
+        }
+        button { padding: 10px 20px; font-size: 20px; cursor: pointer; background: #4CAF50; color: white; border: none; border-radius: 5px; }
+        button:hover { background: #45a049; }
+    </style>
+</head>
+<body>
+    <h1>{{.Name}}</h1>
+    <p>Вес: {{.Weight}} кг</p>
+    
+    <div class="kirill" style="width: {{.Size}}px; height: {{.Size}}px; line-height: {{.Size}}px;">
+        🐷
+    </div>
+
+    <form action="/feed" method="post">
+        <button type="submit">Покормить Кирилла 🍎</button>
+    </form>
+</body>
+</html>
+`
